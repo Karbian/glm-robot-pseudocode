@@ -1,6 +1,6 @@
 # GLM Robot Pseudocode Lab — GitHub Pages Edition
 
-Version **2.1.0**
+Version **2.2.0**
 
 A browser-based pseudocode learning environment for Grade 7 students. Students program an animated service robot through progressively harder mazes while learning:
 
@@ -16,6 +16,14 @@ A browser-based pseudocode learning environment for Grade 7 students. Students p
 10. an integrated capstone algorithm.
 
 No server, database, build tool, package manager, or API key is required. Student code and unlocked missions are stored in `localStorage` in the current browser.
+
+## What changed in v2.2
+
+### 3D-first maze simulator
+
+The maze now opens in **Perspective 3D** and includes a camera rotation control for viewing each mission from four directions. The renderer adds a raised maze platform, taller shaded walls, elevated task markers, smooth movement arcs, and depth-sorted walls, markers and robot animation.
+
+Students can still switch to **Top-down 2D** at any time. An explicit view choice and the 3D camera angle are saved in `localStorage`; mission code, progress and unlocks continue to use the same storage record as v2.1.
 
 ## What changed in v2.1
 

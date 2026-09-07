@@ -25,13 +25,15 @@
     sensorFront:$("sensorFront"),sensorLeft:$("sensorLeft"),sensorRight:$("sensorRight"),
     sensorGoal:$("sensorGoal"),sensorTask:$("sensorTask"), flowchartOverlay:$("flowchartOverlay"),
     flowchartCanvas:$("flowchartCanvas"),flowchartViewport:$("flowchartViewport"),
-    canvasShell:$("canvasShell"),view2d:$("view2dButton"),view3d:$("view3dButton")
+    canvasShell:$("canvasShell"),view2d:$("view2dButton"),view3d:$("view3dButton"),
+    rotateView:$("rotateViewButton")
   };
   const ctx = els.canvas.getContext("2d");
 
   let current = 0, maze = null, robot = null, runtime = null, running = false, timer = null;
   let progress = loadProgress();
-  let viewMode = progress.viewMode === "3d" ? "3d" : "2d";
+  let viewMode = progress.viewMode === "2d" ? "2d" : "3d";
+  let cameraQuarter = progress.cameraQuarter;
 
   const commandTemplates = [
     ["MOVE FORWARD", ["MOVE FORWARD"]], ["TURN LEFT",["TURN LEFT"]], ["TURN RIGHT",["TURN RIGHT"]],
@@ -52,23 +54,42 @@
   function loadProgress(){
     try{
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      return {unlocked:Number.isInteger(saved.unlocked)?saved.unlocked:0,completed:saved.completed||{},code:saved.code||{},viewMode:saved.viewMode==="3d"?"3d":"2d"};
-    }catch{return {unlocked:0,completed:{},code:{},viewMode:"2d"}}
+      const explicitView=saved.viewPreferenceSet===true;
+      return {
+        unlocked:Number.isInteger(saved.unlocked)?saved.unlocked:0,
+        completed:saved.completed||{},code:saved.code||{},
+        viewMode:explicitView&&saved.viewMode==="2d"?"2d":"3d",
+        viewPreferenceSet:explicitView,
+        cameraQuarter:Number.isInteger(saved.cameraQuarter)?((saved.cameraQuarter%4)+4)%4:0
+      };
+    }catch{return {unlocked:0,completed:{},code:{},viewMode:"3d",viewPreferenceSet:false,cameraQuarter:0}}
   }
   function saveProgress(){
     progress.code[LEVELS[current].id] = els.code.value;
     progress.viewMode = viewMode;
+    progress.cameraQuarter = cameraQuarter;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
   }
 
   function setViewMode(mode, announce=true){
     viewMode=mode==="3d"?"3d":"2d";
+    if(announce)progress.viewPreferenceSet=true;
+    const cameraNames=["northwest","northeast","southeast","southwest"];
     els.view2d.setAttribute("aria-pressed",String(viewMode==="2d"));
     els.view3d.setAttribute("aria-pressed",String(viewMode==="3d"));
+    els.rotateView.hidden=viewMode!=="3d";
+    els.rotateView.setAttribute("aria-label",`Rotate the 3D camera clockwise. Current view: ${cameraNames[cameraQuarter]}`);
     els.canvasShell.classList.toggle("perspective-mode",viewMode==="3d");
     els.canvas.setAttribute("aria-label",viewMode==="3d"?"Robot maze in perspective 3D view":"Robot maze in top-down 2D view");
     saveProgress();draw();
     if(announce)toast(viewMode==="3d"?"Perspective 3D view enabled":"Top-down 2D view enabled");
+  }
+
+  function rotatePerspective(){
+    cameraQuarter=(cameraQuarter+1)%4;
+    const cameraNames=["northwest","northeast","southeast","southwest"];
+    els.rotateView.setAttribute("aria-label",`Rotate the 3D camera clockwise. Current view: ${cameraNames[cameraQuarter]}`);
+    saveProgress();draw();toast(`3D camera: ${cameraNames[cameraQuarter]} view`);
   }
 
   function makeToolbar(target, templates){
@@ -131,7 +152,7 @@
 
   function resetRobotState(){
     const l=LEVELS[current];
-    robot={x:maze.start.x,y:maze.start.y,dir:l.direction,completed:new Set(),action:null,speech:null,anim:0};
+    robot={x:maze.start.x,y:maze.start.y,dir:l.direction,completed:new Set(),action:null,speech:null,anim:0,moveFrom:null};
     runtime={steps:[],pointer:0,variables:{},functions:{},used:new Map(),raw:""};
     running=false;
   }
@@ -358,6 +379,7 @@
     if(n==="MOVE FORWARD"){
       markUsed("MOVE FORWARD");const [dx,dy]=DELTAS[robot.dir];
       if(isWall(robot.x+dx,robot.y+dy))throw new Error(`Line ${s.line}: MOVE FORWARD hits a wall.`);
+      robot.moveFrom={x:robot.x,y:robot.y};
       robot.x+=dx;robot.y+=dy;robot.action="move";
       addTrace(text,`Robot moved to (${robot.x}, ${robot.y}).`);return {done:false,animate:"move"};
     }
@@ -545,10 +567,33 @@
     drawRobot(cell);
   }
 
+  function rotateGridPoint(x,y){
+    if(cameraQuarter===1)return {x:maze.height-y,y:x};
+    if(cameraQuarter===2)return {x:maze.width-x,y:maze.height-y};
+    if(cameraQuarter===3)return {x:y,y:maze.width-x};
+    return {x,y};
+  }
+
   function isoPoint(x,y,z,g){
+    const point=rotateGridPoint(x,y);
     return {
-      x:g.originX+(x-y)*g.tileW/2,
-      y:g.originY+(x+y)*g.tileH/2-z
+      x:g.originX+(point.x-point.y)*g.tileW/2,
+      y:g.originY+(point.x+point.y)*g.tileH/2-z
+    };
+  }
+
+  function perspectiveDepth(x,y){
+    const point=rotateGridPoint(x,y);
+    return {depth:point.x+point.y,lateral:point.x};
+  }
+
+  function robotRenderPosition(){
+    if(robot.action!=="move"||!robot.moveFrom)return {x:robot.x,y:robot.y};
+    const t=Math.max(0,Math.min(1,robot.anim));
+    const eased=t*t*(3-2*t);
+    return {
+      x:robot.moveFrom.x+(robot.x-robot.moveFrom.x)*eased,
+      y:robot.moveFrom.y+(robot.y-robot.moveFrom.y)*eased
     };
   }
 
@@ -568,11 +613,39 @@
 
   function drawIsoWall(x,y,g){
     const base=isoTileCorners(x,y,0,g),top=isoTileCorners(x,y,g.wallH,g);
-    drawPolygon([base[3],base[2],top[2],top[3]],"#123f73","#092b50",1.2);
-    drawPolygon([base[1],base[2],top[2],top[1]],"#0d315a","#092b50",1.2);
-    drawPolygon(top,"#285c8f","#d4e9fa",1);
+    drawPolygon([base[3],base[2],top[2],top[3]],"#174a79","#092b50",1.2);
+    drawPolygon([base[1],base[2],top[2],top[1]],"#0a2d52","#092b50",1.2);
+    drawPolygon(top,"#3974a8","#d4e9fa",1);
     ctx.strokeStyle="rgba(255,255,255,.22)";ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(top[0].x,top[0].y);ctx.lineTo(top[2].x,top[2].y);ctx.stroke();
+  }
+
+  function drawIsoMarker(x,y,v,g){
+    const lower=isoPoint(x+.5,y+.5,1,g),top=isoPoint(x+.5,y+.5,7,g);
+    if(v==="G"){
+      const size=g.tileW*.31;
+      const base=[
+        {x:lower.x,y:lower.y-g.tileH*.31},{x:lower.x+size,y:lower.y},
+        {x:lower.x,y:lower.y+g.tileH*.31},{x:lower.x-size,y:lower.y}
+      ];
+      const cap=base.map(p=>({x:p.x,y:p.y-6}));
+      drawPolygon([base[1],base[2],cap[2],cap[1]],"#b88b08","#795c00",1);
+      drawPolygon([base[2],base[3],cap[3],cap[2]],"#d8aa19","#795c00",1);
+      drawPolygon(cap,"#f2c94c","#8d6c00",1.4);
+      ctx.fillStyle="#092b50";ctx.font=`900 ${Math.max(12,g.tileW*.22)}px system-ui`;
+      ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("G",top.x,top.y+5);
+      return;
+    }
+    if(!TASKS[v])return;
+    const done=robot.completed.has(`${x},${y}`),color=done?"#76bd8e":TASKS[v].color;
+    const radius=g.tileW*.23,thickness=6;
+    ctx.fillStyle=done?"#4c8d63":"rgba(9,43,80,.55)";
+    ctx.beginPath();ctx.ellipse(lower.x,lower.y,radius,radius*.52,0,0,Math.PI);ctx.lineTo(lower.x-radius,lower.y-thickness);ctx.ellipse(lower.x,lower.y-thickness,radius,radius*.52,0,Math.PI,Math.PI*2);ctx.closePath();ctx.fill();
+    ctx.save();ctx.translate(top.x,top.y);ctx.scale(1,.52);
+    ctx.fillStyle=color;ctx.strokeStyle="#fff";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
+    ctx.fillStyle="#fff";ctx.font=`900 ${Math.max(11,g.tileW*.21)}px system-ui`;
+    ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(done?"✓":v,top.x,top.y);
   }
 
   function drawPerspective(){
@@ -580,71 +653,69 @@
     const maxW=Math.max(300,Math.min(840,shell.clientWidth-16));
     const span=maze.width+maze.height;
     const byWidth=(maxW-48)*2/span;
-    const byHeight=420/(span*.25+.34);
+    const byHeight=450/(span*.25+.46);
     const tileW=Math.floor(Math.max(26,Math.min(74,byWidth,byHeight)));
-    const tileH=tileW*.5,wallH=tileW*.34;
+    const tileH=tileW*.5,wallH=tileW*.46;
+    const viewWidth=cameraQuarter%2===0?maze.width:maze.height;
+    const viewHeight=cameraQuarter%2===0?maze.height:maze.width;
     const w=Math.ceil(span*tileW/2+48);
-    const h=Math.ceil(span*tileH/2+wallH+104);
-    const g={tileW,tileH,wallH,originX:24+maze.height*tileW/2,originY:wallH+42,w,h};
+    const h=Math.ceil(span*tileH/2+wallH+118);
+    const g={tileW,tileH,wallH,originX:24+viewHeight*tileW/2,originY:wallH+48,w,h,viewWidth,viewHeight};
     resizeCanvas(w,h);
 
     const sky=ctx.createLinearGradient(0,0,0,h);
-    sky.addColorStop(0,"#dff2ff");sky.addColorStop(.44,"#f4fbff");
-    sky.addColorStop(.445,"#d6e5cf");sky.addColorStop(1,"#b9cdb0");
+    sky.addColorStop(0,"#cfeaff");sky.addColorStop(.43,"#f6fcff");
+    sky.addColorStop(.435,"#d8e8d2");sky.addColorStop(1,"#afc7a6");
     ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
 
-    const outline=[
+    const platformTop=[
       isoPoint(0,0,0,g),isoPoint(maze.width,0,0,g),
       isoPoint(maze.width,maze.height,0,g),isoPoint(0,maze.height,0,g)
     ];
-    ctx.save();ctx.translate(0,tileH*.35);
-    drawPolygon(outline,"rgba(20,43,55,.18)",null);
+    const platformBottom=[
+      isoPoint(0,0,-tileW*.12,g),isoPoint(maze.width,0,-tileW*.12,g),
+      isoPoint(maze.width,maze.height,-tileW*.12,g),isoPoint(0,maze.height,-tileW*.12,g)
+    ];
+    ctx.save();ctx.translate(0,tileH*.42);
+    drawPolygon(platformTop,"rgba(20,43,55,.22)",null);
     ctx.restore();
+    for(let i=0;i<4;i++){
+      const next=(i+1)%4;
+      drawPolygon([platformTop[i],platformTop[next],platformBottom[next],platformBottom[i]],i%2?"#6e8390":"#8296a0","#546875",1);
+    }
 
     const cells=[];
-    for(let y=0;y<maze.height;y++)for(let x=0;x<maze.width;x++)cells.push({x,y,v:maze.rows[y][x]});
-    cells.sort((a,b)=>(a.x+a.y)-(b.x+b.y)||a.x-b.x);
+    for(let y=0;y<maze.height;y++)for(let x=0;x<maze.width;x++){
+      const order=perspectiveDepth(x+.5,y+.5);
+      cells.push({x,y,v:maze.rows[y][x],...order});
+    }
+    cells.sort((a,b)=>a.depth-b.depth||a.lateral-b.lateral);
 
     cells.forEach(({x,y,v})=>{
-      const fill=v==="#"?"#9eb3c1":(x+y)%2?"#f8fbff":"#e9f1f7";
-      drawPolygon(isoTileCorners(x,y,0,g),fill,v==="#"?"#758fa3":"#c5d4df",1);
+      const fill=v==="#"?"#92a9b7":(x+y)%2?"#f9fcff":"#e8f1f7";
+      drawPolygon(isoTileCorners(x,y,0,g),fill,v==="#"?"#6f8797":"#bfd0dc",1);
     });
 
-    cells.forEach(({x,y,v})=>{if(v==="#")drawIsoWall(x,y,g)});
-
-    // Important mission markers are drawn above the wall pass so they remain
-    // readable even when a foreground boundary wall overlaps their floor tile.
-    cells.forEach(({x,y,v})=>{
-      if(v==="#")return;
-      const center=isoPoint(x+.5,y+.5,1,g);
-      if(v==="G"){
-        const goal=[
-          {x:center.x,y:center.y-g.tileH*.31},{x:center.x+g.tileW*.31,y:center.y},
-          {x:center.x,y:center.y+g.tileH*.31},{x:center.x-g.tileW*.31,y:center.y}
-        ];
-        drawPolygon(goal,"#f2c94c","#9d7700",1.4);
-        ctx.fillStyle="#092b50";ctx.font=`900 ${Math.max(12,tileW*.22)}px system-ui`;
-        ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("G",center.x,center.y);
-      }
-      if(TASKS[v]){
-        const done=robot.completed.has(`${x},${y}`);
-        ctx.save();ctx.translate(center.x,center.y);ctx.scale(1,.52);
-        ctx.fillStyle=done?"#76bd8e":TASKS[v].color;ctx.strokeStyle="#fff";ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(0,0,tileW*.23,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
-        ctx.fillStyle="#fff";ctx.font=`900 ${Math.max(11,tileW*.21)}px system-ui`;
-        ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(done?"✓":v,center.x,center.y);
-      }
+    const objects=[];
+    cells.forEach(({x,y,v,depth,lateral})=>{
+      if(v==="#")objects.push({depth,lateral,priority:1,draw:()=>drawIsoWall(x,y,g)});
+      else if(v==="G"||TASKS[v])objects.push({depth,lateral,priority:0,draw:()=>drawIsoMarker(x,y,v,g)});
     });
-    drawRobotPerspective(g);
+    const position=robotRenderPosition(),robotOrder=perspectiveDepth(position.x+.5,position.y+.5);
+    objects.push({...robotOrder,priority:2,draw:()=>drawRobotPerspective(g,position)});
+    objects.sort((a,b)=>a.depth-b.depth||a.lateral-b.lateral||a.priority-b.priority);
+    objects.forEach(item=>item.draw());
 
     ctx.fillStyle="rgba(9,43,80,.82)";ctx.font="800 11px system-ui";
-    ctx.textAlign="right";ctx.textBaseline="top";ctx.fillText("PERSPECTIVE 3D",w-12,10);
+    const cameraNames=["NW","NE","SE","SW"];
+    ctx.textAlign="right";ctx.textBaseline="top";ctx.fillText(`PERSPECTIVE 3D · ${cameraNames[cameraQuarter]} CAMERA`,w-12,10);
   }
 
-  function drawRobotPerspective(g){
-    const ground=isoPoint(robot.x+.5,robot.y+.5,4,g);
+  function drawRobotPerspective(g,position=robotRenderPosition()){
+    const ground=isoPoint(position.x+.5,position.y+.5,4,g);
     const scale=Math.max(24,g.tileW*.68);
     let bounce=0,wiggle=0;
+    if(robot.action==="move")bounce=Math.sin(robot.anim*Math.PI)*scale*.13;
     if(robot.action==="dance"){bounce=Math.sin(robot.anim*Math.PI*6)*scale*.12;wiggle=Math.sin(robot.anim*Math.PI*8)*.2}
     if(robot.action==="clean")wiggle=Math.sin(robot.anim*Math.PI*10)*.12;
     const cx=ground.x,cy=ground.y-scale*.31-bounce;
@@ -689,7 +760,7 @@
     ctx.restore();
 
     const [dx,dy]=DELTAS[robot.dir];
-    const ahead=isoPoint(robot.x+.5+dx*.34,robot.y+.5+dy*.34,3,g);
+    const ahead=isoPoint(position.x+.5+dx*.34,position.y+.5+dy*.34,3,g);
     const vx=ahead.x-ground.x,vy=ahead.y-ground.y,len=Math.hypot(vx,vy)||1;
     const ux=vx/len,uy=vy/len,px=-uy,py=ux;
     const tip={x:ground.x+ux*scale*.52,y:ground.y+uy*scale*.52};
@@ -742,12 +813,12 @@
   function animateAction(action){
     return new Promise(resolve=>{
       const reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if(reduced){robot.anim=1;draw();robot.action=null;robot.speech=null;resolve();return}
+      if(reduced){robot.anim=1;draw();robot.action=null;robot.speech=null;robot.moveFrom=null;robot.anim=0;draw();resolve();return}
       const duration=action==="dance"?900:action==="clean"?850:action==="talk"?1050:600,start=performance.now();
       function frame(now){
         robot.anim=Math.min(1,(now-start)/duration);draw();
         if(robot.anim<1)requestAnimationFrame(frame);
-        else{setTimeout(()=>{robot.action=null;robot.speech=null;robot.anim=0;draw();resolve()},80)}
+        else{setTimeout(()=>{robot.action=null;robot.speech=null;robot.moveFrom=null;robot.anim=0;draw();resolve()},80)}
       }requestAnimationFrame(frame);
     });
   }
@@ -821,7 +892,7 @@
   els.hintButton.addEventListener("click",()=>{els.hintBox.hidden=!els.hintBox.hidden;els.hintButton.textContent=els.hintBox.hidden?"Show hint":"Hide hint"});
   els.run.addEventListener("click",runProgram);els.step.addEventListener("click",doStep);els.reset.addEventListener("click",reset);
   els.code.addEventListener("input",()=>{updateLineIndicator();saveProgress()});els.code.addEventListener("click",updateLineIndicator);els.code.addEventListener("keyup",updateLineIndicator);
-  els.view2d.addEventListener("click",()=>setViewMode("2d"));els.view3d.addEventListener("click",()=>setViewMode("3d"));
+  els.view2d.addEventListener("click",()=>setViewMode("2d"));els.view3d.addEventListener("click",()=>setViewMode("3d"));els.rotateView.addEventListener("click",rotatePerspective);
   $("downloadButton").addEventListener("click",downloadText);$("flowchartButton").addEventListener("click",showFlowchart);
   $("closeFlowchartButton").addEventListener("click",closeFlowchart);$("downloadFlowchartButton").addEventListener("click",downloadFlowSvg);
   els.flowchartOverlay.addEventListener("click",e=>{if(e.target===els.flowchartOverlay)closeFlowchart()});

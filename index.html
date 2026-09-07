@@ -54,12 +54,13 @@
         <div class="simulator-body">
           <div class="view-toolbar" role="group" aria-label="Maze view">
             <span>Maze view</span>
-            <button id="view2dButton" class="view-button" type="button" aria-pressed="true">Top-down 2D</button>
-            <button id="view3dButton" class="view-button" type="button" aria-pressed="false">Perspective 3D</button>
+            <button id="view2dButton" class="view-button" type="button" aria-pressed="false">Top-down 2D</button>
+            <button id="view3dButton" class="view-button" type="button" aria-pressed="true">Perspective 3D</button>
+            <button id="rotateViewButton" class="view-button camera-button" type="button" aria-label="Rotate the 3D camera clockwise">Rotate 3D ↻</button>
           </div>
 
-          <div id="canvasShell" class="canvas-shell">
-            <canvas id="mazeCanvas" width="720" height="520" aria-label="Robot maze"></canvas>
+          <div id="canvasShell" class="canvas-shell perspective-mode">
+            <canvas id="mazeCanvas" width="720" height="520" aria-label="Robot maze in perspective 3D view"></canvas>
           </div>
 
           <div class="sensor-row">
@@ -207,7 +208,7 @@ CALL celebrate()</pre>
     </section>
 
     <footer>
-      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.1.0</span>
+      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.2.0</span>
     </footer>
   </main>
 
