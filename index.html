@@ -52,7 +52,13 @@
         <div class="learning-focus" id="learningFocus"></div>
 
         <div class="simulator-body">
-          <div class="canvas-shell">
+          <div class="view-toolbar" role="group" aria-label="Maze view">
+            <span>Maze view</span>
+            <button id="view2dButton" class="view-button" type="button" aria-pressed="true">Top-down 2D</button>
+            <button id="view3dButton" class="view-button" type="button" aria-pressed="false">Perspective 3D</button>
+          </div>
+
+          <div id="canvasShell" class="canvas-shell">
             <canvas id="mazeCanvas" width="720" height="520" aria-label="Robot maze"></canvas>
           </div>
 
@@ -158,7 +164,7 @@ OUTPUT pathOpen</pre>
             <summary>IF = choose one path</summary>
             <pre>INPUT FRONT_IS_CLEAR INTO pathOpen
 IF pathOpen THEN
-  MOVE
+  MOVE FORWARD
 ELSE
   TURN RIGHT
 END IF</pre>
@@ -177,10 +183,10 @@ END IF</pre>
           <details>
             <summary>Loops</summary>
             <pre>REPEAT 4 TIMES
-  MOVE
+  MOVE FORWARD
 END REPEAT</pre>
             <pre>WHILE FRONT_IS_CLEAR DO
-  MOVE
+  MOVE FORWARD
 END WHILE</pre>
           </details>
 
@@ -201,7 +207,7 @@ CALL celebrate()</pre>
     </section>
 
     <footer>
-      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.0.0</span>
+      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.1.0</span>
     </footer>
   </main>
 

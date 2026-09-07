@@ -24,15 +24,17 @@
     commandToolbar:$("commandToolbar"), blockToolbar:$("blockToolbar"), toast:$("toast"),
     sensorFront:$("sensorFront"),sensorLeft:$("sensorLeft"),sensorRight:$("sensorRight"),
     sensorGoal:$("sensorGoal"),sensorTask:$("sensorTask"), flowchartOverlay:$("flowchartOverlay"),
-    flowchartCanvas:$("flowchartCanvas"),flowchartViewport:$("flowchartViewport")
+    flowchartCanvas:$("flowchartCanvas"),flowchartViewport:$("flowchartViewport"),
+    canvasShell:$("canvasShell"),view2d:$("view2dButton"),view3d:$("view3dButton")
   };
   const ctx = els.canvas.getContext("2d");
 
   let current = 0, maze = null, robot = null, runtime = null, running = false, timer = null;
   let progress = loadProgress();
+  let viewMode = progress.viewMode === "3d" ? "3d" : "2d";
 
   const commandTemplates = [
-    ["MOVE", ["MOVE"]], ["TURN LEFT",["TURN LEFT"]], ["TURN RIGHT",["TURN RIGHT"]],
+    ["MOVE FORWARD", ["MOVE FORWARD"]], ["TURN LEFT",["TURN LEFT"]], ["TURN RIGHT",["TURN RIGHT"]],
     ["OUTPUT",['OUTPUT "Hello!"']], ["INPUT",["INPUT FRONT_IS_CLEAR INTO pathOpen"]],
     ["CLEAN",["CLEAN"]], ["DANCE",["DANCE"]], ["RAISE HAND",["RAISE HAND"]],
     ["SET",["SET steps TO 0"]], ["INCREASE",["INCREASE steps BY 1"]], ["CALL",["CALL celebrate()"]]
@@ -50,12 +52,23 @@
   function loadProgress(){
     try{
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      return {unlocked:Number.isInteger(saved.unlocked)?saved.unlocked:0,completed:saved.completed||{},code:saved.code||{}};
-    }catch{return {unlocked:0,completed:{},code:{}}}
+      return {unlocked:Number.isInteger(saved.unlocked)?saved.unlocked:0,completed:saved.completed||{},code:saved.code||{},viewMode:saved.viewMode==="3d"?"3d":"2d"};
+    }catch{return {unlocked:0,completed:{},code:{},viewMode:"2d"}}
   }
   function saveProgress(){
     progress.code[LEVELS[current].id] = els.code.value;
+    progress.viewMode = viewMode;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  }
+
+  function setViewMode(mode, announce=true){
+    viewMode=mode==="3d"?"3d":"2d";
+    els.view2d.setAttribute("aria-pressed",String(viewMode==="2d"));
+    els.view3d.setAttribute("aria-pressed",String(viewMode==="3d"));
+    els.canvasShell.classList.toggle("perspective-mode",viewMode==="3d");
+    els.canvas.setAttribute("aria-label",viewMode==="3d"?"Robot maze in perspective 3D view":"Robot maze in top-down 2D view");
+    saveProgress();draw();
+    if(announce)toast(viewMode==="3d"?"Perspective 3D view enabled":"Top-down 2D view enabled");
   }
 
   function makeToolbar(target, templates){
@@ -342,9 +355,9 @@
 
   function executeCommand(s){
     const text=s.raw.trim(), n=normalize(text);
-    if(n==="MOVE"){
-      markUsed("MOVE");const [dx,dy]=DELTAS[robot.dir];
-      if(isWall(robot.x+dx,robot.y+dy))throw new Error(`Line ${s.line}: MOVE hits a wall.`);
+    if(n==="MOVE FORWARD"){
+      markUsed("MOVE FORWARD");const [dx,dy]=DELTAS[robot.dir];
+      if(isWall(robot.x+dx,robot.y+dy))throw new Error(`Line ${s.line}: MOVE FORWARD hits a wall.`);
       robot.x+=dx;robot.y+=dy;robot.action="move";
       addTrace(text,`Robot moved to (${robot.x}, ${robot.y}).`);return {done:false,animate:"move"};
     }
@@ -501,12 +514,24 @@
   }
 
   function draw(){
+    if(!maze||!robot)return;
+    if(viewMode==="3d")drawPerspective();
+    else drawTopDown();
+  }
+
+  function resizeCanvas(w,h){
+    const dpr=Math.min(window.devicePixelRatio||1,2);
+    els.canvas.width=Math.round(w*dpr);els.canvas.height=Math.round(h*dpr);
+    els.canvas.style.width=`${Math.round(w)}px`;els.canvas.style.height=`${Math.round(h)}px`;
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  }
+
+  function drawTopDown(){
     const shell=els.canvas.parentElement;
     const maxW=Math.max(280,Math.min(760,shell.clientWidth-20)), maxH=500;
     const cell=Math.max(26,Math.floor(Math.min(maxW/maze.width,maxH/maze.height)));
-    const w=maze.width*cell,h=maze.height*cell,dpr=Math.min(window.devicePixelRatio||1,2);
-    els.canvas.width=w*dpr;els.canvas.height=h*dpr;els.canvas.style.width=`${w}px`;els.canvas.style.height=`${h}px`;
-    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+    const w=maze.width*cell,h=maze.height*cell;
+    resizeCanvas(w,h);
     for(let y=0;y<maze.height;y++)for(let x=0;x<maze.width;x++){
       const v=maze.rows[y][x],px=x*cell,py=y*cell;
       if(v==="#"){ctx.fillStyle="#123f73";ctx.fillRect(px,py,cell,cell);ctx.strokeStyle="rgba(255,255,255,.12)";ctx.strokeRect(px+.5,py+.5,cell-1,cell-1)}
@@ -518,6 +543,171 @@
       }
     }
     drawRobot(cell);
+  }
+
+  function isoPoint(x,y,z,g){
+    return {
+      x:g.originX+(x-y)*g.tileW/2,
+      y:g.originY+(x+y)*g.tileH/2-z
+    };
+  }
+
+  function drawPolygon(points,fill,stroke="#8fa5b8",lineWidth=1){
+    ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);
+    ctx.closePath();ctx.fillStyle=fill;ctx.fill();
+    if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lineWidth;ctx.stroke()}
+  }
+
+  function isoTileCorners(x,y,z,g){
+    return [
+      isoPoint(x,y,z,g),isoPoint(x+1,y,z,g),
+      isoPoint(x+1,y+1,z,g),isoPoint(x,y+1,z,g)
+    ];
+  }
+
+  function drawIsoWall(x,y,g){
+    const base=isoTileCorners(x,y,0,g),top=isoTileCorners(x,y,g.wallH,g);
+    drawPolygon([base[3],base[2],top[2],top[3]],"#123f73","#092b50",1.2);
+    drawPolygon([base[1],base[2],top[2],top[1]],"#0d315a","#092b50",1.2);
+    drawPolygon(top,"#285c8f","#d4e9fa",1);
+    ctx.strokeStyle="rgba(255,255,255,.22)";ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(top[0].x,top[0].y);ctx.lineTo(top[2].x,top[2].y);ctx.stroke();
+  }
+
+  function drawPerspective(){
+    const shell=els.canvasShell;
+    const maxW=Math.max(300,Math.min(840,shell.clientWidth-16));
+    const span=maze.width+maze.height;
+    const byWidth=(maxW-48)*2/span;
+    const byHeight=420/(span*.25+.34);
+    const tileW=Math.floor(Math.max(26,Math.min(74,byWidth,byHeight)));
+    const tileH=tileW*.5,wallH=tileW*.34;
+    const w=Math.ceil(span*tileW/2+48);
+    const h=Math.ceil(span*tileH/2+wallH+104);
+    const g={tileW,tileH,wallH,originX:24+maze.height*tileW/2,originY:wallH+42,w,h};
+    resizeCanvas(w,h);
+
+    const sky=ctx.createLinearGradient(0,0,0,h);
+    sky.addColorStop(0,"#dff2ff");sky.addColorStop(.44,"#f4fbff");
+    sky.addColorStop(.445,"#d6e5cf");sky.addColorStop(1,"#b9cdb0");
+    ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
+
+    const outline=[
+      isoPoint(0,0,0,g),isoPoint(maze.width,0,0,g),
+      isoPoint(maze.width,maze.height,0,g),isoPoint(0,maze.height,0,g)
+    ];
+    ctx.save();ctx.translate(0,tileH*.35);
+    drawPolygon(outline,"rgba(20,43,55,.18)",null);
+    ctx.restore();
+
+    const cells=[];
+    for(let y=0;y<maze.height;y++)for(let x=0;x<maze.width;x++)cells.push({x,y,v:maze.rows[y][x]});
+    cells.sort((a,b)=>(a.x+a.y)-(b.x+b.y)||a.x-b.x);
+
+    cells.forEach(({x,y,v})=>{
+      const fill=v==="#"?"#9eb3c1":(x+y)%2?"#f8fbff":"#e9f1f7";
+      drawPolygon(isoTileCorners(x,y,0,g),fill,v==="#"?"#758fa3":"#c5d4df",1);
+    });
+
+    cells.forEach(({x,y,v})=>{if(v==="#")drawIsoWall(x,y,g)});
+
+    // Important mission markers are drawn above the wall pass so they remain
+    // readable even when a foreground boundary wall overlaps their floor tile.
+    cells.forEach(({x,y,v})=>{
+      if(v==="#")return;
+      const center=isoPoint(x+.5,y+.5,1,g);
+      if(v==="G"){
+        const goal=[
+          {x:center.x,y:center.y-g.tileH*.31},{x:center.x+g.tileW*.31,y:center.y},
+          {x:center.x,y:center.y+g.tileH*.31},{x:center.x-g.tileW*.31,y:center.y}
+        ];
+        drawPolygon(goal,"#f2c94c","#9d7700",1.4);
+        ctx.fillStyle="#092b50";ctx.font=`900 ${Math.max(12,tileW*.22)}px system-ui`;
+        ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("G",center.x,center.y);
+      }
+      if(TASKS[v]){
+        const done=robot.completed.has(`${x},${y}`);
+        ctx.save();ctx.translate(center.x,center.y);ctx.scale(1,.52);
+        ctx.fillStyle=done?"#76bd8e":TASKS[v].color;ctx.strokeStyle="#fff";ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(0,0,tileW*.23,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();
+        ctx.fillStyle="#fff";ctx.font=`900 ${Math.max(11,tileW*.21)}px system-ui`;
+        ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(done?"✓":v,center.x,center.y);
+      }
+    });
+    drawRobotPerspective(g);
+
+    ctx.fillStyle="rgba(9,43,80,.82)";ctx.font="800 11px system-ui";
+    ctx.textAlign="right";ctx.textBaseline="top";ctx.fillText("PERSPECTIVE 3D",w-12,10);
+  }
+
+  function drawRobotPerspective(g){
+    const ground=isoPoint(robot.x+.5,robot.y+.5,4,g);
+    const scale=Math.max(24,g.tileW*.68);
+    let bounce=0,wiggle=0;
+    if(robot.action==="dance"){bounce=Math.sin(robot.anim*Math.PI*6)*scale*.12;wiggle=Math.sin(robot.anim*Math.PI*8)*.2}
+    if(robot.action==="clean")wiggle=Math.sin(robot.anim*Math.PI*10)*.12;
+    const cx=ground.x,cy=ground.y-scale*.31-bounce;
+
+    ctx.save();ctx.globalAlpha=.22;ctx.fillStyle="#102438";ctx.beginPath();
+    ctx.ellipse(ground.x,ground.y+g.tileH*.08,scale*.34,scale*.13,0,0,Math.PI*2);ctx.fill();ctx.restore();
+
+    if(robot.action==="dance"){
+      const colors=["#f2c94c","#d9534f","#3b8f57","#2878b5","#8e57ad"];
+      for(let i=0;i<10;i++){
+        const angle=i*.9+robot.anim*5,rad=scale*(.55+(i%3)*.12);
+        ctx.fillStyle=colors[i%colors.length];
+        ctx.fillRect(cx+Math.cos(angle)*rad,cy-scale*.3+Math.sin(angle*1.7)*rad*.45,4,7);
+      }
+    }
+
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(wiggle);
+    const bodyGradient=ctx.createLinearGradient(-scale*.25,0,scale*.25,0);
+    bodyGradient.addColorStop(0,"#dbe8f2");bodyGradient.addColorStop(.5,"#fff");bodyGradient.addColorStop(1,"#b8cfdf");
+    ctx.fillStyle=bodyGradient;ctx.strokeStyle="#123f73";ctx.lineWidth=Math.max(2,scale*.045);
+    ctx.beginPath();ctx.roundRect(-scale*.23,-scale*.12,scale*.46,scale*.43,scale*.09);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#eef7fd";ctx.beginPath();ctx.arc(0,-scale*.25,scale*.18,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#123f73";ctx.beginPath();ctx.arc(-scale*.06,-scale*.27,scale*.026,0,Math.PI*2);ctx.arc(scale*.06,-scale*.27,scale*.026,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#4da3d9";ctx.beginPath();ctx.arc(0,scale*.05,scale*.055,0,Math.PI*2);ctx.fill();
+
+    ctx.strokeStyle="#123f73";ctx.lineWidth=scale*.055;ctx.lineCap="round";
+    ctx.beginPath();ctx.moveTo(-scale*.2,scale*.02);ctx.lineTo(-scale*.34,scale*.17);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(scale*.2,scale*.02);
+    if(robot.action==="raise_hand"||robot.action==="dance")ctx.lineTo(scale*.36,-scale*.33);
+    else ctx.lineTo(scale*.34,scale*.17);
+    ctx.stroke();
+    ctx.beginPath();ctx.moveTo(-scale*.11,scale*.29);ctx.lineTo(-scale*.13,scale*.43);ctx.moveTo(scale*.11,scale*.29);ctx.lineTo(scale*.13,scale*.43);ctx.stroke();
+
+    if(robot.action==="clean"){
+      ctx.strokeStyle="#795548";ctx.lineWidth=scale*.045;ctx.beginPath();ctx.moveTo(scale*.18,scale*.08);ctx.lineTo(scale*.46,scale*.42);ctx.stroke();
+      ctx.fillStyle="#f2c94c";ctx.beginPath();ctx.ellipse(scale*.46,scale*.42,scale*.17,scale*.06,.2,0,Math.PI*2);ctx.fill();
+      for(let i=0;i<5;i++){
+        const dust=(i+1)/6;ctx.fillStyle=`rgba(126,96,66,${1-robot.anim*.8})`;
+        ctx.beginPath();ctx.arc(scale*(.28+dust*.42),scale*(.43-Math.sin(robot.anim*Math.PI*4+i)*.08),2+i%2,0,Math.PI*2);ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    const [dx,dy]=DELTAS[robot.dir];
+    const ahead=isoPoint(robot.x+.5+dx*.34,robot.y+.5+dy*.34,3,g);
+    const vx=ahead.x-ground.x,vy=ahead.y-ground.y,len=Math.hypot(vx,vy)||1;
+    const ux=vx/len,uy=vy/len,px=-uy,py=ux;
+    const tip={x:ground.x+ux*scale*.52,y:ground.y+uy*scale*.52};
+    drawPolygon([
+      tip,
+      {x:tip.x-ux*scale*.2+px*scale*.1,y:tip.y-uy*scale*.2+py*scale*.1},
+      {x:tip.x-ux*scale*.2-px*scale*.1,y:tip.y-uy*scale*.2-py*scale*.1}
+    ],"#f2c94c","#8d6c00",1);
+
+    if(robot.speech){
+      const text=robot.speech.length>34?robot.speech.slice(0,32)+"…":robot.speech;
+      ctx.font=`700 ${Math.max(11,scale*.18)}px system-ui`;
+      const tw=Math.min(g.w*.72,ctx.measureText(text).width+26),bh=Math.max(36,scale*.56);
+      const bx=Math.max(5,Math.min(cx-tw/2,g.w-tw-5)),by=Math.max(5,cy-scale*.78-bh);
+      ctx.fillStyle="#fff";ctx.strokeStyle="#123f73";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(bx,by,tw,bh,10);ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-7,by+bh);ctx.lineTo(cx,by+bh+10);ctx.lineTo(cx+7,by+bh);ctx.fill();ctx.stroke();
+      ctx.fillStyle="#172033";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(text,bx+tw/2,by+bh/2);
+    }
   }
 
   function drawRobot(cell){
@@ -631,6 +821,7 @@
   els.hintButton.addEventListener("click",()=>{els.hintBox.hidden=!els.hintBox.hidden;els.hintButton.textContent=els.hintBox.hidden?"Show hint":"Hide hint"});
   els.run.addEventListener("click",runProgram);els.step.addEventListener("click",doStep);els.reset.addEventListener("click",reset);
   els.code.addEventListener("input",()=>{updateLineIndicator();saveProgress()});els.code.addEventListener("click",updateLineIndicator);els.code.addEventListener("keyup",updateLineIndicator);
+  els.view2d.addEventListener("click",()=>setViewMode("2d"));els.view3d.addEventListener("click",()=>setViewMode("3d"));
   $("downloadButton").addEventListener("click",downloadText);$("flowchartButton").addEventListener("click",showFlowchart);
   $("closeFlowchartButton").addEventListener("click",closeFlowchart);$("downloadFlowchartButton").addEventListener("click",downloadFlowSvg);
   els.flowchartOverlay.addEventListener("click",e=>{if(e.target===els.flowchartOverlay)closeFlowchart()});
@@ -639,4 +830,5 @@
 
   makeToolbar(els.commandToolbar,commandTemplates);makeToolbar(els.blockToolbar,blockTemplates);
   loadLevel(Math.min(progress.unlocked,LEVELS.length-1));
+  setViewMode(viewMode,false);
 })();

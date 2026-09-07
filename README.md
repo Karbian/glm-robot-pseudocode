@@ -1,6 +1,6 @@
 # GLM Robot Pseudocode Lab — GitHub Pages Edition
 
-Version **2.0.0**
+Version **2.1.0**
 
 A browser-based pseudocode learning environment for Grade 7 students. Students program an animated service robot through progressively harder mazes while learning:
 
@@ -16,6 +16,28 @@ A browser-based pseudocode learning environment for Grade 7 students. Students p
 10. an integrated capstone algorithm.
 
 No server, database, build tool, package manager, or API key is required. Student code and unlocked missions are stored in `localStorage` in the current browser.
+
+## What changed in v2.1
+
+### Switchable 2D and perspective 3D maze
+
+Students can change the simulator between **Top-down 2D** and **Perspective 3D** at any time. Both views use the same mission state, sensors, robot position, completed task tiles, animations and execution trace.
+
+The perspective view adds:
+
+- an isometric classroom camera;
+- raised, shaded maze walls;
+- depth-sorted floor tiles and objects;
+- an elevated robot with a ground shadow and direction marker;
+- perspective task and goal tiles;
+- the existing clean, dance, raise-hand and speech animations;
+- responsive canvas sizing for Chromebook and tablet screens.
+
+The selected view is saved in `localStorage`, so it remains active after refreshing the page. The renderer uses the existing HTML canvas and requires no WebGL or external 3D library.
+
+### Clear movement command
+
+The movement command is now written consistently as `MOVE FORWARD` in the toolbar, interpreter, missions, examples, flowcharts and error messages.
 
 ## What changed in v2.0
 
@@ -81,7 +103,7 @@ Mission 3 separates the two jobs:
 INPUT FRONT_IS_CLEAR INTO pathOpen
 
 IF pathOpen THEN
-  MOVE
+  MOVE FORWARD
 ELSE
   TURN RIGHT
 END IF
@@ -97,7 +119,7 @@ Later missions progressively introduce `CURRENT_TASK`, multiple sensor variables
 START
 END
 
-MOVE
+MOVE FORWARD
 TURN LEFT
 TURN RIGHT
 CLEAN
@@ -188,6 +210,7 @@ Then open `http://localhost:8000`.
 ## Classroom design preserved
 
 - ten progressively unlocked missions;
+- switchable top-down and perspective 3D maze views;
 - required action spots rather than decorative spots;
 - animated `CLEAN`, `DANCE`, `OUTPUT`, and `RAISE HAND`;
 - an output speech bubble over the robot;
