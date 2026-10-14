@@ -1,12 +1,12 @@
 # GLM Robot Pseudocode Lab — GitHub Pages Edition
 
-Version **2.2.0**
+Version **2.3.0**
 
 A browser-based pseudocode learning environment for Grade 7 students. Students program an animated service robot through progressively harder mazes while learning:
 
 1. sequence and output;
 2. `INPUT` and stored sensor values;
-3. `IF / ELSE` decisions;
+3. `IF / ELSE IF / ELSE` decisions;
 4. counted `REPEAT` loops;
 5. variables and state changes;
 6. condition-controlled `WHILE` loops;
@@ -16,6 +16,32 @@ A browser-based pseudocode learning environment for Grade 7 students. Students p
 10. an integrated capstone algorithm.
 
 No server, database, build tool, package manager, or API key is required. Student code and unlocked missions are stored in `localStorage` in the current browser.
+
+## What changed in v2.3 — multi-way decisions
+
+- Added **IF / ELSE IF / ELSE** and **ELSE IF** insertable toolbar snippets.
+- Multiple **ELSE IF condition THEN** branches and an optional final **ELSE** share one **END IF**.
+- Runtime checks conditions in order; step trace indicates when another condition is being checked.
+- Flowchart view shows additional ELSE IF decisions, and malformed branches report line-numbered errors.
+- Student mission progress remains in the same localStorage key.
+
+```text
+START
+INPUT CURRENT_TASK INTO task
+IF task = "CLEAN" THEN
+  CLEAN
+ELSE IF task = "DANCE" THEN
+  DANCE
+ELSE IF task = "RAISE_HAND" THEN
+  RAISE HAND
+ELSE
+  OUTPUT "No action requested"
+END IF
+END
+```
+
+### Compared with PseudoEditor
+The GLM version emphasizes robot-based missions, visual execution, tracing and teacher-designed scaffolding rather than exam-board modes or cloud accounts. Syntax highlighting, autocomplete and cloud projects are **not** added in this release.
 
 ## What changed in v2.2
 
