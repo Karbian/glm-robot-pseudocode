@@ -172,6 +172,19 @@ END IF</pre>
             <p>If <code>pathOpen</code> is TRUE, the robot moves. If it is FALSE, the robot turns right. Only one branch runs.</p>
           </details>
 
+          <details open>
+            <summary>ELSE IF = check another condition</summary>
+            <p>Use <code>ELSE IF</code> when there are three or more possible results. Check conditions from top to bottom. Only the first true branch runs. Close the chain with one <code>END IF</code>.</p>
+            <pre>INPUT CURRENT_TASK INTO task
+IF task = "CLEAN" THEN
+  CLEAN
+ELSE IF task = "DANCE" THEN
+  DANCE
+ELSE
+  OUTPUT "Try another square"
+END IF</pre>
+            <p>Insert the <strong>IF / ELSE IF / ELSE</strong> block above, then replace the example conditions.</p>
+          </details>
           <details>
             <summary>Task sensor example</summary>
             <pre>INPUT CURRENT_TASK INTO task
@@ -208,7 +221,7 @@ CALL celebrate()</pre>
     </section>
 
     <footer>
-      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.2.0</span>
+      <span>GLM Robot Pseudocode Lab · GitHub Pages edition · v2.3.0</span>
     </footer>
   </main>
 
