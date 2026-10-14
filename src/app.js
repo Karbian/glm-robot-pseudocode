@@ -44,6 +44,8 @@
 
   // Multiline blocks are arrays of real lines. Nothing in the editor receives a visible "\n" token.
   const blockTemplates = [
+    ["IF / ELSE IF / ELSE",["IF condition1 THEN","  // first choice","ELSE IF condition2 THEN","  // second choice","ELSE","  // otherwise","END IF"]],
+    ["ELSE IF",["ELSE IF condition THEN","  // instructions when TRUE"]],
     ["IF / ELSE",["IF condition THEN","  // instructions when TRUE","ELSE","  // instructions when FALSE","END IF"]],
     ["IF",["IF condition THEN","  // instructions","END IF"]],
     ["REPEAT",["REPEAT 3 TIMES","  // repeated instructions","END REPEAT"]],
@@ -227,21 +229,43 @@
     while(i<lines.length){
       const item=lines[i], n=normalize(item.text);
       if(n.startsWith("IF ")){
-        const cond=item.text.replace(/^IF\s+/i,"").replace(/\s+THEN\s*$/i,"").trim();
-        if(!/\s+THEN\s*$/i.test(item.text))throw new Error(`Line ${item.line}: IF must end with THEN.`);
-        let level=1,j=i+1,elseAt=-1;
+        const opening=item.text.match(/^IF\s+(.+?)\s+THEN\s*$/i);
+        if(!opening)throw new Error(`Line ${item.line}: use IF condition THEN.`);
+        // ELSE IF and ELSE at the outer level belong to this IF, not nested IF blocks.
+        const branches=[{kind:"if",line:item.line,raw:item.text,condition:opening[1],start:i+1}];
+        let level=1,j=i+1,sawElse=false;
         for(;j<lines.length;j++){
           const q=normalize(lines[j].text);
-          if(q.startsWith("IF "))level++;
-          if(q==="END IF"){level--;if(level===0)break}
-          if(q==="ELSE"&&level===1)elseAt=j;
+          if(q.startsWith("IF ")){level++;continue}
+          if(q==="END IF"){level--;if(level===0)break;continue}
+          if(level!==1)continue;
+          if(/^ELSE\s+IF\b/.test(q)){
+            if(sawElse)throw new Error(`Line ${lines[j].line}: ELSE IF must appear before ELSE.`);
+            const branch=lines[j].text.match(/^ELSE\s+IF\s+(.+?)\s+THEN\s*$/i);
+            if(!branch)throw new Error(`Line ${lines[j].line}: use ELSE IF condition THEN.`);
+            branches[branches.length-1].end=j;
+            branches.push({kind:"else-if",line:lines[j].line,raw:lines[j].text,condition:branch[1],start:j+1});
+          }else if(q==="ELSE"){
+            if(sawElse)throw new Error(`Line ${lines[j].line}: only one ELSE is allowed.`);
+            sawElse=true;
+            branches[branches.length-1].end=j;
+            branches.push({kind:"else",line:lines[j].line,raw:lines[j].text,start:j+1});
+          }else if(/^ELSE\b/.test(q)){
+            throw new Error(`Line ${lines[j].line}: use ELSE IF condition THEN or ELSE.`);
+          }
         }
         if(j>=lines.length)throw new Error(`Line ${item.line}: IF is missing END IF.`);
-        const aStart=i+1,aEnd=elseAt>=0?elseAt:j,bStart=elseAt>=0?elseAt+1:j,bEnd=j;
-        out.push({type:"if",line:item.line,raw:item.text,condition:cond,
-          thenSteps:expandBlock(lines.slice(aStart,aEnd),functions,depth+1),
-          elseSteps:expandBlock(lines.slice(bStart,bEnd),functions,depth+1)});
-        i=j+1;continue;
+        branches[branches.length-1].end=j;
+        // Later conditions are only evaluated when earlier decisions are false.
+        let next=[];
+        for(let b=branches.length-1;b>=0;b--){
+          const branch=branches[b];
+          const body=expandBlock(lines.slice(branch.start,branch.end),functions,depth+1);
+          if(branch.kind==="else"){next=body;continue}
+          next=[{type:"if",line:branch.line,raw:branch.raw,condition:branch.condition,
+            thenSteps:body,elseSteps:next,isElseIf:branch.kind==="else-if"}];
+        }
+        out.push(...next);i=j+1;continue;
       }
       if(/^REPEAT\s+/i.test(item.text)){
         const m=item.text.match(/^REPEAT\s+(.+?)\s+TIMES$/i);
@@ -261,7 +285,7 @@
         out.push({type:"while",line:item.line,raw:item.text,condition:m[1],body:expandBlock(lines.slice(i+1,j),functions,depth+1)});
         i=j+1;continue;
       }
-      if(["ELSE","END IF","END REPEAT","END WHILE","END FUNCTION"].includes(n))throw new Error(`Line ${item.line}: unexpected ${item.text}.`);
+      if(/^ELSE\b/.test(n)||["END IF","END REPEAT","END WHILE","END FUNCTION"].includes(n))throw new Error(`Line ${item.line}: unexpected ${item.text}.`);
       out.push({type:"command",line:item.line,raw:item.text}); i++;
     }
     return out;
@@ -348,7 +372,8 @@
     if(s.type==="if"){
       markUsed("IF");
       const choice=evaluateCondition(s.condition);
-      addTrace(s.raw,`Condition ${s.condition} = ${choice?"TRUE":"FALSE"} → ${choice?"THEN":"ELSE"}`);
+      const nextIsElseIf=!choice&&s.elseSteps[0]?.isElseIf;
+      addTrace(s.raw,`Condition ${s.condition} = ${choice?"TRUE":"FALSE"} → ${choice?"run this branch":nextIsElseIf?"check ELSE IF":s.elseSteps.length?"run ELSE":"skip"}`);
       enqueueFront(choice?s.thenSteps:s.elseSteps);
       return {done:false};
     }
@@ -854,7 +879,7 @@
         }else if(s.type==="if"){
           nodes.push({type:"decision",text:`IF ${s.condition}`,depth});
           nodes.push({type:"label",text:"TRUE",depth:depth+1});visit(s.thenSteps,depth+1);
-          if(s.elseSteps.length){nodes.push({type:"label",text:"FALSE",depth:depth+1});visit(s.elseSteps,depth+1)}
+          if(s.elseSteps.length){nodes.push({type:"label",text:s.elseSteps[0]?.isElseIf?"FALSE → ELSE IF":"FALSE → ELSE",depth:depth+1});visit(s.elseSteps,depth+1)}
           nodes.push({type:"merge",text:"END IF",depth});
         }else if(s.type==="repeat"){
           nodes.push({type:"decision",text:`REPEAT ${s.countExpr} TIMES`,depth});visit(s.body,depth+1);nodes.push({type:"merge",text:"END REPEAT ↺",depth});
